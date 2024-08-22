@@ -27,6 +27,7 @@ std::pair DesktopDimensions = { 0,0 };
 bool bFixResolution;
 bool bFixHUD;
 bool bFixFOV;
+bool bStretchCutscene;
 float fAdditionalFOV;
 bool bUncapFPS;
 
@@ -138,6 +139,7 @@ void Configuration()
     inipp::get_value(ini.sections["Fix Resolution"], "Enabled", bFixResolution);
     inipp::get_value(ini.sections["Fix HUD"], "Enabled", bFixHUD);
     inipp::get_value(ini.sections["Fix FOV"], "Enabled", bFixFOV);
+    inipp::get_value(ini.sections["Stretch Cutscenes"], "Enabled", bStretchCutscene);
     inipp::get_value(ini.sections["Gameplay FOV"], "AdditionalFOV", fAdditionalFOV);
     inipp::get_value(ini.sections["Remove 30FPS Cap"], "Enabled", bUncapFPS);
 
@@ -145,6 +147,7 @@ void Configuration()
     spdlog::info("Config Parse: bFixResolution: {}", bFixResolution);
     spdlog::info("Config Parse: bFixHUD: {}", bFixHUD);
     spdlog::info("Config Parse: bFixFOV: {}", bFixFOV);
+    spdlog::info("Config Parse: bStretchCutscene: {}", bStretchCutscene);
     if (fAdditionalFOV < (float)-80 || fAdditionalFOV >(float)80) {
         fAdditionalFOV = std::clamp(fAdditionalFOV, (float)-80, (float)80);
         spdlog::warn("Config Parse: fAdditionalFOV value invalid, clamped to {}", fAdditionalFOV);
@@ -254,31 +257,34 @@ void HUD()
         }
 
         // Movies
-        uint8_t* MoviesScanResult = Memory::PatternScan(baseModule, "C4 ?? ?? ?? ?? ?? C5 ?? ?? ?? ?? C5 ?? ?? ?? 48 ?? ?? ?? 4C ?? ?? ?? C5 ?? ?? ?? 48 ?? ?? ??");
-        if (MoviesScanResult) {
-            spdlog::info("Movies: Address is {:s}+{:x}", sExeName.c_str(), (uintptr_t)MoviesScanResult - (uintptr_t)baseModule);
-            static SafetyHookMid MoviesMidHook{};
-            MoviesMidHook = safetyhook::create_mid(MoviesScanResult + 0x6,
-                [](SafetyHookContext& ctx) {
-                    float Width = ctx.xmm0.f32[0];
-                    float Height = ctx.xmm2.f32[0];
+        if (!bStretchCutscene)
+        {
+            uint8_t* MoviesScanResult = Memory::PatternScan(baseModule, "C4 ?? ?? ?? ?? ?? C5 ?? ?? ?? ?? C5 ?? ?? ?? 48 ?? ?? ?? 4C ?? ?? ?? C5 ?? ?? ?? 48 ?? ?? ??");
+            if (MoviesScanResult) {
+                spdlog::info("Movies: Address is {:s}+{:x}", sExeName.c_str(), (uintptr_t)MoviesScanResult - (uintptr_t)baseModule);
+                static SafetyHookMid MoviesMidHook{};
+                MoviesMidHook = safetyhook::create_mid(MoviesScanResult + 0x6,
+                    [](SafetyHookContext& ctx) {
+                        float Width = ctx.xmm0.f32[0];
+                        float Height = ctx.xmm2.f32[0];
 
-                    if (fAspectRatio > fNativeAspect) {
-                        float HUDWidth = ctx.xmm2.f32[0] * fNativeAspect;
-                        float WidthOffset = (Width - HUDWidth) / 2.00f;
-                        ctx.xmm0.f32[0] = HUDWidth + WidthOffset;
-                        ctx.xmm1.f32[0] = WidthOffset;
-                    }
-                    else if (fAspectRatio < fNativeAspect) {
-                        float HUDHeight = ctx.xmm0.f32[0] / fNativeAspect;
-                        float HeightOffset = (Height - HUDHeight) / 2.00f;
-                        ctx.xmm2.f32[0] = HUDHeight + HeightOffset;
-                        ctx.xmm3.f32[0] = HeightOffset;
-                    }
-                });
-        }
-        else if (!MoviesScanResult) {
-            spdlog::error("Movies: Pattern scan failed.");
+                        if (fAspectRatio > fNativeAspect) {
+                            float HUDWidth = (ctx.xmm2.f32[0] * fNativeAspect);
+                            float WidthOffset = (Width - HUDWidth) / 2.00f;
+                            ctx.xmm0.f32[0] = HUDWidth + WidthOffset;
+                            ctx.xmm1.f32[0] = WidthOffset;
+                        }
+                        else if (fAspectRatio < fNativeAspect) {
+                            float HUDHeight = (ctx.xmm0.f32[0] / fNativeAspect);
+                            float HeightOffset = (Height - HUDHeight) / 2.00f;
+                            ctx.xmm2.f32[0] = HUDHeight + HeightOffset;
+                            ctx.xmm3.f32[0] = HeightOffset;
+                        }
+                    });
+            }
+            else if (!MoviesScanResult) {
+                spdlog::error("Movies: Pattern scan failed.");
+            }
         }
     }
 }
